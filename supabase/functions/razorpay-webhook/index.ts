@@ -1,0 +1,2 @@
+import {reply,signature,confirm} from '../_shared/core.ts';
+Deno.serve(async req=>{try{const raw=await req.text();if(!await signature(raw,req.headers.get('x-razorpay-signature')||'',Deno.env.get('RAZORPAY_WEBHOOK_SECRET')!))return reply({error:'Invalid signature'},401);const event=JSON.parse(raw);if(event.event==='payment.captured'){const p=event.payload.payment.entity;await confirm(p.order_id,p.id);}return reply({received:true});}catch(e){return reply({error:e.message},500)}});
