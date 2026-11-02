@@ -14,7 +14,7 @@ create table booking_payments(id uuid primary key default gen_random_uuid(),book
 create table payment_transactions(id uuid primary key default gen_random_uuid(),booking_id uuid references bookings,event_id text unique,payload jsonb,created_at timestamptz default now());
 create table booking_cancellations(id uuid primary key default gen_random_uuid(),booking_id uuid unique references bookings,reason text,created_at timestamptz default now());
 create table refunds(id uuid primary key default gen_random_uuid(),booking_id uuid references bookings,amount_paise integer,status text default 'pending',gateway_id text);
-create table email_notifications(id uuid primary key default gen_random_uuid(),booking_id uuid references bookings,kind text,send_at timestamptz default now(),status text default 'pending',unique(booking_id,kind));
+create table email_notifications(id uuid primary key default gen_random_uuid(),booking_id uuid references bookings,kind text,send_at timestamptz default now(),status text default 'pending' check(status in ('pending','sending','sent','failed')),unique(booking_id,kind));
 create table audit_logs(id bigint generated always as identity primary key,booking_id uuid references bookings,action text,created_at timestamptz default now());
 -- Deny access by default; customers only see their own records.
 do $$ declare t text; begin foreach t in array array['users','customer_profiles','admin_users','turf_facilities','turf_operating_hours','promotional_coupons','bookings','booking_slots','booking_payments','payment_transactions','booking_cancellations','refunds','email_notifications','audit_logs'] loop execute format('alter table public.%I enable row level security',t); end loop; end $$;
@@ -40,7 +40,7 @@ rng:=tstzrange((p_date+p_start) at time zone 'Asia/Kolkata',(p_date+p_start+make
 if lower(rng)<=now() then raise exception 'Select a future time'; end if;
 update bookings set status='expired' where status='held' and expires_at<=now();
 if exists(select 1 from booking_slots where facility_id=f.id and period && rng) then raise exception 'Slot blocked'; end if;
-amount:=(case when extract(dow from p_date) in (0,6) then coalesce(f.weekend_paise,f.hourly_paise) else f.hourly_paise end)*p_duration/60;
+amount:=(p_duration/60)*120000+case when p_duration%60=30 then 70000 else 0 end;
 if p_coupon<>'' then select percent into discount from promotional_coupons where code=p_coupon and active and (expires_at is null or expires_at>now()); if discount is null then raise exception 'Invalid coupon'; end if; amount:=amount*(100-discount)/100; end if;
 insert into bookings(user_id,facility_id,booking_date,start_time,duration_minutes,period,status,expires_at,amount_paise,customer_name,mobile) values(p_user,f.id,p_date,p_start,p_duration,rng,'held',now()+interval '10 minutes',amount,p_name,p_mobile) returning * into result; return result;
 end $$;
