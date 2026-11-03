@@ -230,10 +230,22 @@ function App() {
       return;
     }
     setHold(data);
+    const releaseUnpaidHold = async (message) => {
+      const result = await db.functions.invoke("release-booking", {
+        body: { order_id: data.order_id },
+      });
+      setHold(null);
+      setMessage(
+        result.error
+          ? "Checkout closed. The reservation will expire automatically shortly."
+          : message,
+      );
+      refresh();
+    };
     const script = document.createElement("script");
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.onload = () =>
-      new window.Razorpay({
+    script.onload = () => {
+      const checkoutWindow = new window.Razorpay({
         key: data.key_id,
         order_id: data.order_id,
         amount: data.amount,
@@ -254,14 +266,21 @@ function App() {
         },
         modal: {
           ondismiss: () =>
-            setMessage(
-              "Checkout closed. Unpaid reservations expire automatically after 10 minutes.",
+            releaseUnpaidHold(
+              "Payment cancelled. The time slot is available again.",
             ),
         },
-      }).open();
+      });
+      checkoutWindow.on("payment.failed", () =>
+        releaseUnpaidHold(
+          "Payment failed. The time slot is available again.",
+        ),
+      );
+      checkoutWindow.open();
+    };
     script.onerror = () =>
-      setMessage(
-        "Payment service could not load. Your reservation expires in 10 minutes.",
+      releaseUnpaidHold(
+        "Payment service could not load. The time slot is available again.",
       );
     document.body.appendChild(script);
   }
