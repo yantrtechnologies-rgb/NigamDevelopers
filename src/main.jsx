@@ -38,6 +38,23 @@ const today = () =>
   new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(
     new Date(),
   );
+const nextBookableTime = () => {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Kolkata",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date())
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)]),
+  );
+  const minutes = Math.ceil((parts.hour * 60 + parts.minute + 1) / 30) * 30;
+  return minutes > 22 * 60 + 30
+    ? "23:59"
+    : `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+};
 function App() {
   const [date, setDate] = useState(today()),
     [duration, setDuration] = useState(60),
@@ -310,6 +327,14 @@ function App() {
     refresh();
   }
   async function adminBlock(fullDay = false) {
+    if (!adminForm.reason.trim()) {
+      setMessage("Please enter a reason before blocking availability.");
+      return;
+    }
+    if (adminForm.date < today() || (adminForm.date === today() && (fullDay || adminForm.start < nextBookableTime()))) {
+      setMessage("Past dates and times cannot be blocked.");
+      return;
+    }
     setBusy(true);
     const { error } = await db.rpc("admin_block_period", {
       p_date: adminForm.date,
@@ -821,7 +846,7 @@ function App() {
                 <div className="admin-grid">
                   <form onSubmit={adminCreate}><h3>Create manual booking</h3>
                     <label>Date<input required type="date" min={today()} value={adminForm.date} onChange={(e) => setAdminForm({ ...adminForm, date: e.target.value })} /></label>
-                    <label>Start time<input required type="time" min="05:00" max="22:30" step="1800" value={adminForm.start} onChange={(e) => setAdminForm({ ...adminForm, start: e.target.value })} /></label>
+                    <label>Start time<input required type="time" min={adminForm.date === today() ? nextBookableTime() : "05:00"} max="22:30" step="1800" value={adminForm.start} onChange={(e) => setAdminForm({ ...adminForm, start: e.target.value })} /></label>
                     <label>Duration<select value={adminForm.duration} onChange={(e) => setAdminForm({ ...adminForm, duration: +e.target.value })}>{[30, 60, 90, 120].map((n) => <option key={n} value={n}>{n} minutes</option>)}</select></label>
                     <label>Customer name<input required value={adminForm.name} onChange={(e) => setAdminForm({ ...adminForm, name: e.target.value })} /></label>
                     <label>Mobile<input required pattern="[6-9][0-9]{9}" value={adminForm.mobile} onChange={(e) => setAdminForm({ ...adminForm, mobile: e.target.value })} /></label>
@@ -829,9 +854,9 @@ function App() {
                     <button className="green" disabled={busy}>Create booking</button>
                   </form>
                   <div><h3>Block availability</h3><p>The date, time and duration selected on the left are used for slot blocking.</p>
-                    <label>Reason<input value={adminForm.reason} onChange={(e) => setAdminForm({ ...adminForm, reason: e.target.value })} /></label>
-                    <div className="admin-actions"><button className="outline" disabled={busy} onClick={() => adminBlock(false)}>Block selected slot</button><button className="outline" disabled={busy} onClick={() => adminBlock(true)}>Block entire day</button></div>
-                    <h3>Active blocks</h3><div className="admin-list">{!adminData.blocks.length ? <p>No blocked periods.</p> : adminData.blocks.map((b) => <article key={b.id}><span>{b.reason}</span><button className="plain" onClick={() => removeBlock(b.id)}>Remove</button></article>)}</div>
+                    <label>Reason (required)<input required value={adminForm.reason} onChange={(e) => setAdminForm({ ...adminForm, reason: e.target.value })} /></label>
+                    <div className="admin-actions"><button className="outline" disabled={busy || !adminForm.reason.trim()} onClick={() => adminBlock(false)}>Block selected slot</button><button className="outline" disabled={busy || !adminForm.reason.trim() || adminForm.date <= today()} onClick={() => adminBlock(true)}>Block entire day</button></div>
+                    <h3>Active blocks</h3><div className="admin-list">{!adminData.blocks.length ? <p>No blocked periods.</p> : adminData.blocks.map((b) => <article key={b.id}><span><strong>{new Date(b.start_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}</strong> – {new Date(b.end_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}<br />Reason: {b.reason}</span><button className="plain" onClick={() => removeBlock(b.id)}>Remove</button></article>)}</div>
                   </div>
                 </div>
                 <h3>All bookings</h3><div className="booking-list admin-bookings">{!adminData.bookings.length ? <p>No bookings yet.</p> : adminData.bookings.map((b) => <article key={b.id}><b>{b.reference || "Payment pending"} · {b.customer_name}</b><p>{b.booking_date} · {String(b.start_time).slice(0, 5)} IST · {b.duration_minutes} minutes · {b.mobile}</p><span>{b.status} · {b.payment_method} · Paid ₹{((b.amount_paid_paise || 0) / 100).toLocaleString("en-IN")}</span></article>)}</div>
