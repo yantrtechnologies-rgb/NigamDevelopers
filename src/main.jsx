@@ -501,7 +501,7 @@ function App() {
                   setTime(null);
                 }}
               >
-                {[30, 60, 90, 120].map((n) => (
+                {[60, 90, 120].map((n) => (
                   <option key={n} value={n}>
                     {n / 60} {n === 60 ? "hour" : "hours"}{" "}
                     {n === 60 ? "· A quick innings" : ""}
@@ -663,15 +663,15 @@ function App() {
             {[
               [
                 "The quick knock",
-                "30 minutes",
-                700,
+                "1 hour",
+                1200,
                 "A little practice. A big refresh.",
               ],
               [
                 "The classic innings",
-                "1 hour",
-                1200,
-                "Your squad’s favourite hour of the day.",
+                "1.5 hours",
+                1900,
+                "More time for the whole squad to play.",
               ],
               [
                 "The long game",
@@ -696,7 +696,7 @@ function App() {
                 <button
                   className={i === 1 ? "green" : "outline"}
                   onClick={() => {
-                    setDuration([30, 60, 120][i]);
+                    setDuration([60, 90, 120][i]);
                     setTime(null);
                     book();
                   }}
@@ -866,7 +866,7 @@ function App() {
                   <form onSubmit={adminCreate}><h3>Create manual booking</h3>
                     <label>Date<input required type="date" min={today()} value={adminForm.date} onChange={(e) => setAdminForm({ ...adminForm, date: e.target.value })} /></label>
                     <label>Start time<input required type="time" min={adminForm.date === today() ? nextBookableTime() : "05:00"} max="22:30" step="1800" value={adminForm.start} onChange={(e) => setAdminForm({ ...adminForm, start: e.target.value })} /></label>
-                    <label>Duration<select value={adminForm.duration} onChange={(e) => setAdminForm({ ...adminForm, duration: +e.target.value })}>{[30, 60, 90, 120].map((n) => <option key={n} value={n}>{n} minutes</option>)}</select></label>
+                    <label>Duration<select value={adminForm.duration} onChange={(e) => setAdminForm({ ...adminForm, duration: +e.target.value })}>{[60, 90, 120].map((n) => <option key={n} value={n}>{n} minutes</option>)}</select></label>
                     <label>Customer name<input required value={adminForm.name} onChange={(e) => setAdminForm({ ...adminForm, name: e.target.value })} /></label>
                     <label>Mobile<input required pattern="[6-9][0-9]{9}" value={adminForm.mobile} onChange={(e) => setAdminForm({ ...adminForm, mobile: e.target.value })} /></label>
                     <label>Payment<select value={adminForm.payment_method} onChange={(e) => setAdminForm({ ...adminForm, payment_method: e.target.value })}><option value="cash">Cash payment</option><option value="complimentary">No payment / complimentary</option></select></label>
