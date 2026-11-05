@@ -1,7 +1,11 @@
 import {createClient} from 'https://esm.sh/@supabase/supabase-js@2';
 import {PDFDocument,StandardFonts,rgb} from 'https://esm.sh/pdf-lib@1.17.1';
 export const admin=createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-const headers={'Access-Control-Allow-Origin':Deno.env.get('SITE_ORIGIN')||'http://localhost:5173','Access-Control-Allow-Headers':'authorization, x-client-info, apikey, content-type','Content-Type':'application/json'};
+// These endpoints authenticate every user operation with a Supabase JWT and do
+// not use browser cookies. A wildcard origin therefore safely supports the
+// temporary HTTP custom domain while GitHub Pages provisions its TLS
+// certificate, as well as the final HTTPS domain and local development.
+const headers={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'authorization, x-client-info, apikey, content-type','Content-Type':'application/json'};
 export const reply=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers});
 export async function user(req:Request){const token=req.headers.get('Authorization')?.replace(/^Bearer /,'');if(!token)throw Error('Sign in required');const {data,error}=await admin.auth.getUser(token);if(error||!data.user)throw Error('Sign in required');return data.user;}
 export async function razor(path:string,body?:unknown){const r=await fetch('https://api.razorpay.com/v1/'+path,{method:body?'POST':'GET',headers:{Authorization:'Basic '+btoa(Deno.env.get('RAZORPAY_KEY_ID')+':'+Deno.env.get('RAZORPAY_KEY_SECRET')),'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.error?.description||'Payment provider unavailable');return data;}
