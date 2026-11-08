@@ -757,26 +757,35 @@ function App() {
             </span>
             <a
               className="green"
-              href="https://www.google.com/maps/search/cricket+turf+Sambalpur+Odisha"
+              href="https://www.google.com/maps/place/21%C2%B026'30.3%22N+83%C2%B057'35.9%22E/@21.4417534,83.9574013,17z/data=!3m1!4b1!4m4!3m3!8m2!3d21.4417534!4d83.9599762?hl=en&entry=ttu"
               target="_blank"
               rel="noreferrer"
             >
-              Explore the area <ArrowUpRight size={17} />
+              Get directions <ArrowUpRight size={17} />
             </a>
-            <small>
-              Exact venue address and contact details will be announced.
-            </small>
+            <small>21°26'30.3&quot;N, 83°57'35.9&quot;E</small>
           </div>
           <div className="map">
             <iframe
-              title="Sambalpur location"
-              src="https://maps.google.com/maps?q=Sambalpur%2C%20Odisha&t=&z=12&ie=UTF8&iwloc=&output=embed"
+              title="Nigam's Turf location"
+              src="https://maps.google.com/maps?ll=21.4417534%2C83.9599762&t=m&z=17&output=embed"
               loading="lazy"
               referrerPolicy="no-referrer-when-downgrade"
             />
-            <span>
-              <MapPin size={16} /> SAMBALPUR, ODISHA
-            </span>
+            <a
+              className="map-link"
+              href="https://www.google.com/maps/place/21%C2%B026'30.3%22N+83%C2%B057'35.9%22E/@21.4417534,83.9574013,17z/data=!3m1!4b1!4m4!3m3!8m2!3d21.4417534!4d83.9599762?hl=en&entry=ttu"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open Nigam's Turf location in Google Maps"
+            >
+              <strong className="map-marker">
+                <MapPin size={25} /> Nigam's Turf
+              </strong>
+              <span>
+                <MapPin size={16} /> NIGAM'S TURF · OPEN IN MAPS
+              </span>
+            </a>
           </div>
         </section>
         <section className="section faq">
