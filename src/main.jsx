@@ -237,7 +237,7 @@ function App() {
     const destination = authMethod === "phone" ? `+91${phone}` : email;
     const { error } = await db.auth.signInWithOtp(
       authMethod === "phone"
-        ? { phone: destination, options: { data: { name, mobile: phone } } }
+        ? { phone: destination, options: { data: { name, mobile: phone, email_contact: email } } }
         : { email: destination, options: { data: { name, mobile: phone } } },
     );
     setBusy(false);
@@ -1059,10 +1059,10 @@ function App() {
                           <option value="phone">SMS to mobile</option>
                         </select>
                       </label>
-                      {authMethod === "email" && <label>
-                        Email address
+                      <label>
+                        {authMethod === "phone" ? "Email for booking confirmations" : "Email address"}
                         <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
-                      </label>}
+                      </label>
                     </>
                   )}
                   {codeSent && (
