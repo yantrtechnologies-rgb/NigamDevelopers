@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient } from "@supabase/supabase-js";
+import QRCode from "qrcode";
 import {
   ArrowUpRight,
   ArrowRight,
@@ -21,6 +22,8 @@ import {
   CalendarDays,
   Trophy,
   Download,
+  Camera,
+  QrCode,
 } from "lucide-react";
 import "./style.css";
 const configured = !!(
@@ -55,6 +58,7 @@ const nextBookableTime = () => {
     ? "23:59"
     : `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 };
+const bookingQrPayload = (reference) => `nigamsturf:booking:${reference}`;
 function App() {
   const [date, setDate] = useState(today()),
     [duration, setDuration] = useState(60),
@@ -69,15 +73,21 @@ function App() {
     [email, setEmail] = useState(""),
     [code, setCode] = useState(""),
     [codeSent, setCodeSent] = useState(false),
+    [authMethod, setAuthMethod] = useState("email"),
     [name, setName] = useState(""),
     [phone, setPhone] = useState(""),
     [coupon, setCoupon] = useState(""),
     [hold, setHold] = useState(null),
+    [bookingConfirmation, setBookingConfirmation] = useState(null),
+    [bookingQr, setBookingQr] = useState(""),
     [busy, setBusy] = useState(false);
   const [adminId, setAdminId] = useState(""),
     [adminPassword, setAdminPassword] = useState(""),
     [adminData, setAdminData] = useState(null),
     [ownerOpen, setOwnerOpen] = useState(false),
+    [scanning, setScanning] = useState(false),
+    [scanReference, setScanReference] = useState(""),
+    [scannedBooking, setScannedBooking] = useState(null),
     [adminForm, setAdminForm] = useState({
       date: today(),
       start: "05:00",
@@ -87,6 +97,7 @@ function App() {
       payment_method: "cash",
       reason: "Owner block",
     });
+  const scannerRef = useRef(null);
   const price = Math.floor(duration / 60) * 1200 + (duration % 60 ? 700 : 0);
   const displayedSlots = (
     configured
@@ -143,6 +154,39 @@ function App() {
     const timer = setInterval(refresh, 15000);
     return () => clearInterval(timer);
   }, [date]);
+  useEffect(() => {
+    if (!scanning || !ownerOpen || !adminData) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { Html5Qrcode } = await import("html5-qrcode");
+        if (cancelled) return;
+        const scanner = new Html5Qrcode("admin-qr-reader");
+        scannerRef.current = scanner;
+        await scanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 230, height: 230 } },
+          (decodedText) => {
+            findScannedBooking(decodedText);
+            setScanning(false);
+          },
+          () => {},
+        );
+      } catch (error) {
+        setScanning(false);
+        setMessage(
+          error?.message ||
+            "The camera could not start. Allow camera access or enter the booking reference manually.",
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+      const scanner = scannerRef.current;
+      scannerRef.current = null;
+      if (scanner) scanner.stop().catch(() => {}).finally(() => scanner.clear());
+    };
+  }, [scanning, ownerOpen, adminData]);
   function open(m) {
     setMessage("");
     setMenu(false);
@@ -173,11 +217,12 @@ function App() {
     }
     setBusy(true);
     if (codeSent) {
-      const { error } = await db.auth.verifyOtp({
-        email,
-        token: code.trim(),
-        type: "email",
-      });
+      const destination = authMethod === "phone" ? `+91${phone}` : email;
+      const { error } = await db.auth.verifyOtp(
+        authMethod === "phone"
+          ? { phone: destination, token: code.trim(), type: "sms" }
+          : { email: destination, token: code.trim(), type: "email" },
+      );
       setBusy(false);
       if (error) {
         setMessage(error.message);
@@ -189,17 +234,23 @@ function App() {
       setModal(null);
       return;
     }
-    const { error } = await db.auth.signInWithOtp({
-      email,
-      options: { data: { name, mobile: phone } },
-    });
+    const destination = authMethod === "phone" ? `+91${phone}` : email;
+    const { error } = await db.auth.signInWithOtp(
+      authMethod === "phone"
+        ? { phone: destination, options: { data: { name, mobile: phone } } }
+        : { email: destination, options: { data: { name, mobile: phone } } },
+    );
     setBusy(false);
     if (error) {
       setMessage(error.message);
       return;
     }
     setCodeSent(true);
-    setMessage("A verification code has been sent to your email.");
+    setMessage(
+      authMethod === "phone"
+        ? `SMS sent successfully. Enter the verification code sent to +91 ${phone}.`
+        : `Email sent successfully. Enter the verification code sent to ${email}.`,
+    );
   }
   async function checkout(e) {
     e.preventDefault();
@@ -257,11 +308,29 @@ function App() {
           const result = await db.functions.invoke("verify-payment", {
             body: response,
           });
-          setMessage(
-            result.error
-              ? "Payment verification is pending. Check My bookings before retrying."
-              : `Payment received. Booking reference: ${result.data.reference}`,
-          );
+          if (result.error) {
+            setMessage("Payment verification is pending. Check My bookings before retrying.");
+          } else {
+            const confirmation = result.data.booking || {
+              reference: result.data.reference,
+              booking_date: date,
+              start_time: time.start_time,
+              duration_minutes: duration,
+              customer_name: name,
+              mobile: phone,
+              amount_paise: data.amount,
+            };
+            setBookingConfirmation(confirmation);
+            setBookingQr(
+              await QRCode.toDataURL(bookingQrPayload(confirmation.reference), {
+                width: 280,
+                margin: 2,
+                color: { dark: "#173e2b", light: "#ffffff" },
+              }),
+            );
+            setModal("confirmation");
+            setMessage("Payment confirmed. A confirmation email with your booking QR code and invoice has been sent.");
+          }
           refresh();
         },
         modal: {
@@ -383,6 +452,24 @@ function App() {
     setMessage("Block removed.");
     await loadAdmin();
     refresh();
+  }
+  function findScannedBooking(value) {
+    const reference = String(value || "").match(/SBL-CRT-\d{8}-\d{6}/i)?.[0]?.toUpperCase();
+    if (!reference) {
+      setScannedBooking(null);
+      setMessage("This is not a valid Nigam's Turf booking QR code.");
+      return;
+    }
+    const booking = adminData?.bookings?.find(
+      (item) => item.reference?.toUpperCase() === reference,
+    );
+    setScanReference(reference);
+    setScannedBooking(booking || null);
+    setMessage(
+      booking
+        ? "Booking QR verified successfully."
+        : `No booking was found for ${reference}.`,
+    );
   }
   const book = () =>
     document
@@ -887,6 +974,25 @@ function App() {
                     <h3>Active blocks</h3><div className="admin-list">{!adminData.blocks.length ? <p>No blocked periods.</p> : adminData.blocks.map((b) => <article key={b.id}><span><strong>{new Date(b.start_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}</strong> – {new Date(b.end_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}<br />Reason: {b.reason}</span><button className="plain" onClick={() => removeBlock(b.id)}>Remove</button></article>)}</div>
                   </div>
                 </div>
+                <section className="admin-scanner">
+                  <h3>Scan booking QR</h3>
+                  <p>Scan the customer's booking QR or enter its reference to view the confirmed booking.</p>
+                  <div className="admin-actions">
+                    <button className="outline" type="button" onClick={() => setScanning((value) => !value)}><Camera size={17} /> {scanning ? "Stop camera" : "Open scanner"}</button>
+                  </div>
+                  {scanning && <div id="admin-qr-reader" className="qr-reader" />}
+                  <form className="scan-reference" onSubmit={(event) => { event.preventDefault(); findScannedBooking(scanReference); }}>
+                    <label>Booking reference<input required placeholder="SBL-CRT-YYYYMMDD-000000" value={scanReference} onChange={(event) => setScanReference(event.target.value.toUpperCase())} /></label>
+                    <button className="green">Find booking</button>
+                  </form>
+                  {scannedBooking && <article className="scanned-booking">
+                    <div><QrCode size={28} /><strong>Verified booking</strong></div>
+                    <h3>{scannedBooking.reference}</h3>
+                    <p><b>{scannedBooking.customer_name}</b> · {scannedBooking.mobile}</p>
+                    <p>{scannedBooking.booking_date} · {String(scannedBooking.start_time).slice(0, 5)} IST · {scannedBooking.duration_minutes} minutes</p>
+                    <span>{scannedBooking.status} · {scannedBooking.payment_method} · Paid ₹{((scannedBooking.amount_paid_paise || 0) / 100).toLocaleString("en-IN")}</span>
+                  </article>}
+                </section>
                 <h3>All bookings</h3><div className="booking-list admin-bookings">{!adminData.bookings.length ? <p>No bookings yet.</p> : adminData.bookings.map((b) => <article key={b.id}><b>{b.reference || "Payment pending"} · {b.customer_name}</b><p>{b.booking_date} · {String(b.start_time).slice(0, 5)} IST · {b.duration_minutes} minutes · {b.mobile}</p><span>{b.status} · {b.payment_method} · Paid ₹{((b.amount_paid_paise || 0) / 100).toLocaleString("en-IN")}</span></article>)}</div>
                 <button className="plain" onClick={async () => { await db.auth.signOut(); setAdminData(null); setAdminPassword(""); setMessage(""); }}>Sign out owner</button>
               </>
@@ -919,9 +1025,10 @@ function App() {
                 <h2>Your next innings awaits.</h2>
                 <p>
                   {codeSent
-                    ? `Enter the verification code sent to ${email}.`
-                    : "Sign in securely with a verification code sent to your email."}
+                    ? `Enter the verification code sent to ${authMethod === "phone" ? `+91 ${phone}` : email}.`
+                    : "Sign in securely with a verification code sent by email or SMS."}
                 </p>
+                {message && <p className="notice success" role="status"><Check size={17} /> {message}</p>}
                 <form onSubmit={login}>
                   {!codeSent && (
                     <>
@@ -946,15 +1053,16 @@ function App() {
                         />
                       </label>
                       <label>
-                        Email address
-                        <input
-                          required
-                          type="email"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          autoComplete="email"
-                        />
+                        Send verification code by
+                        <select value={authMethod} onChange={(e) => { setAuthMethod(e.target.value); setMessage(""); }}>
+                          <option value="email">Email</option>
+                          <option value="phone">SMS to mobile</option>
+                        </select>
                       </label>
+                      {authMethod === "email" && <label>
+                        Email address
+                        <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+                      </label>}
                     </>
                   )}
                   {codeSent && (
@@ -993,10 +1101,26 @@ function App() {
                         setMessage("");
                       }}
                     >
-                      Use a different email
+                      Use different details
                     </button>
                   )}
                 </form>
+              </>
+            ) : modal === "confirmation" ? (
+              <>
+                <span className="overline">BOOKING CONFIRMED</span>
+                <h2>Your ground is ready.</h2>
+                {message && <p className="notice success" role="status"><Check size={17} /> {message}</p>}
+                {bookingConfirmation && <div className="booking-confirmation">
+                  {bookingQr && <img src={bookingQr} alt={`Booking QR code for ${bookingConfirmation.reference}`} />}
+                  <h3>{bookingConfirmation.reference}</h3>
+                  <p><b>{bookingConfirmation.customer_name}</b></p>
+                  <p>{bookingConfirmation.booking_date} · {String(bookingConfirmation.start_time).slice(0, 5)} IST · {bookingConfirmation.duration_minutes} minutes</p>
+                  <p>Mobile: {bookingConfirmation.mobile}</p>
+                  <strong>Paid ₹{((bookingConfirmation.amount_paise || 0) / 100).toLocaleString("en-IN")}</strong>
+                  <small>Show this QR code at the turf. The owner can scan it to retrieve your booking.</small>
+                </div>}
+                <button className="green" onClick={() => { setModal(null); setMessage(""); }}>Done</button>
               </>
             ) : modal === "checkout" ? (
               <>
@@ -1116,7 +1240,7 @@ function App() {
                 )}
               </>
             )}
-            {message && (
+            {message && modal !== "login" && modal !== "confirmation" && (
               <p className="notice" role="status">
                 {message}
               </p>
