@@ -941,7 +941,13 @@ function App() {
         </div>
         <p>
           © {new Date().getFullYear()} Nigam\'s Turf · Sambalpur, Odisha{" "}
-          <span>Made for the love of the game.</span>
+          <span className="footer-signoff">
+            <span>Made for the love of the game.</span>
+            <span className="powered-by" aria-label="Powered by Xolnet">
+              <small>Powered by</small>
+              <img src="/xolnet.png" alt="Xolnet" />
+            </span>
+          </span>
         </p>
       </footer>
       {ownerOpen && (
