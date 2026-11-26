@@ -940,7 +940,7 @@ function App() {
           </button>
         </div>
         <p>
-          © {new Date().getFullYear()} Nigam\'s Turf · Sambalpur, Odisha{" "}
+          © {new Date().getFullYear()} Nigam's Turf · Sambalpur, Odisha{" "}
           <span className="footer-signoff">
             <span>Made for the love of the game.</span>
             <span className="powered-by" aria-label="Powered by Xolnet">
