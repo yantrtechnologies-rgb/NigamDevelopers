@@ -58,6 +58,7 @@ const nextBookableTime = () => {
     ? "23:59"
     : `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 };
+const isOwnerPage = ["/login", "/login/"].includes(window.location.pathname);
 const bookingQrPayload = (reference) => `nigamsturf:booking:${reference}`;
 function App() {
   const [date, setDate] = useState(today()),
@@ -84,7 +85,6 @@ function App() {
   const [adminId, setAdminId] = useState(""),
     [adminPassword, setAdminPassword] = useState(""),
     [adminData, setAdminData] = useState(null),
-    [ownerOpen, setOwnerOpen] = useState(false),
     [scanning, setScanning] = useState(false),
     [scanReference, setScanReference] = useState(""),
     [scannedBooking, setScannedBooking] = useState(null),
@@ -135,12 +135,18 @@ function App() {
     }));
   useEffect(() => {
     if (!db) return;
-    db.auth.getSession().then(({ data }) => setSession(data.session));
+    db.auth.getSession().then(async ({ data }) => {
+      setSession(data.session);
+      if (isOwnerPage && data.session) {
+        const dashboard = await db.rpc("admin_dashboard");
+        if (!dashboard.error) setAdminData(dashboard.data);
+      }
+    });
     const { data } = db.auth.onAuthStateChange((_, s) => setSession(s));
     return () => data.subscription.unsubscribe();
   }, []);
   async function refresh() {
-    if (!db) return;
+    if (!db || isOwnerPage) return;
     setLoading(true);
     const { data, error } = await db.rpc("available_slots", { p_date: date });
     setSlots(data || []);
@@ -155,7 +161,7 @@ function App() {
     return () => clearInterval(timer);
   }, [date]);
   useEffect(() => {
-    if (!scanning || !ownerOpen || !adminData) return;
+    if (!scanning || !isOwnerPage || !adminData) return;
     let cancelled = false;
     (async () => {
       try {
@@ -186,15 +192,10 @@ function App() {
       scannerRef.current = null;
       if (scanner) scanner.stop().catch(() => {}).finally(() => scanner.clear());
     };
-  }, [scanning, ownerOpen, adminData]);
+  }, [scanning, adminData]);
   function open(m) {
     setMessage("");
     setMenu(false);
-    if (m === "admin") {
-      setOwnerOpen(true);
-      if (adminData) loadAdmin();
-      return;
-    }
     setModal(m);
     if (m === "bookings") loadBookings(m);
   }
@@ -475,6 +476,73 @@ function App() {
     document
       .getElementById("booking")
       .scrollIntoView({ behavior: "smooth", block: "center" });
+  const ownerPanel = (
+    <section className="modal admin-modal owner-panel" aria-label="Owner dashboard">
+            <span className="overline">OWNER WORKSPACE</span><h2>Owner dashboard</h2>
+            {!adminData ? (
+              <><p>Sign in with your administrator ID and password.</p><form onSubmit={adminLogin}>
+                <label>Admin ID<input required value={adminId} onChange={(e) => setAdminId(e.target.value)} autoComplete="username" /></label>
+                <label>Password<input required type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} autoComplete="current-password" /></label>
+                <button className="green" disabled={busy}>{busy ? "Signing in…" : "Sign in as owner"}<ArrowRight size={17} /></button>
+              </form></>
+            ) : (
+              <>
+                <div className="admin-stats"><article><span>Collected revenue</span><strong>₹{(adminData.revenue_paise / 100).toLocaleString("en-IN")}</strong></article><article><span>Confirmed bookings</span><strong>{adminData.confirmed_count}</strong></article></div>
+                <div className="admin-grid">
+                  <form onSubmit={adminCreate}><h3>Create manual booking</h3>
+                    <label>Date<input required type="date" min={today()} value={adminForm.date} onChange={(e) => setAdminForm({ ...adminForm, date: e.target.value })} /></label>
+                    <label>Start time<input required type="time" min={adminForm.date === today() ? nextBookableTime() : "05:00"} max="22:30" step="1800" value={adminForm.start} onChange={(e) => setAdminForm({ ...adminForm, start: e.target.value })} /></label>
+                    <label>Duration<select value={adminForm.duration} onChange={(e) => setAdminForm({ ...adminForm, duration: +e.target.value })}>{[60, 90, 120].map((n) => <option key={n} value={n}>{n} minutes</option>)}</select></label>
+                    <label>Customer name<input required value={adminForm.name} onChange={(e) => setAdminForm({ ...adminForm, name: e.target.value })} /></label>
+                    <label>Mobile<input required pattern="[6-9][0-9]{9}" value={adminForm.mobile} onChange={(e) => setAdminForm({ ...adminForm, mobile: e.target.value })} /></label>
+                    <label>Payment<select value={adminForm.payment_method} onChange={(e) => setAdminForm({ ...adminForm, payment_method: e.target.value })}><option value="cash">Cash payment</option><option value="complimentary">No payment / complimentary</option></select></label>
+                    <button className="green" disabled={busy}>Create booking</button>
+                  </form>
+                  <div><h3>Block availability</h3><p>The date, time and duration selected on the left are used for slot blocking.</p>
+                    <label>Reason (required)<input required value={adminForm.reason} onChange={(e) => setAdminForm({ ...adminForm, reason: e.target.value })} /></label>
+                    <div className="admin-actions"><button className="outline" disabled={busy || !adminForm.reason.trim()} onClick={() => adminBlock(false)}>Block selected slot</button><button className="outline" disabled={busy || !adminForm.reason.trim() || adminForm.date <= today()} onClick={() => adminBlock(true)}>Block entire day</button></div>
+                    <h3>Active blocks</h3><div className="admin-list">{!adminData.blocks.length ? <p>No blocked periods.</p> : adminData.blocks.map((b) => <article key={b.id}><span><strong>{new Date(b.start_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}</strong> – {new Date(b.end_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}<br />Reason: {b.reason}</span><button className="plain" onClick={() => removeBlock(b.id)}>Remove</button></article>)}</div>
+                  </div>
+                </div>
+                <section className="admin-scanner">
+                  <h3>Scan booking QR</h3>
+                  <p>Scan the customer's booking QR or enter its reference to view the confirmed booking.</p>
+                  <div className="admin-actions">
+                    <button className="outline" type="button" onClick={() => setScanning((value) => !value)}><Camera size={17} /> {scanning ? "Stop camera" : "Open scanner"}</button>
+                  </div>
+                  {scanning && <div id="admin-qr-reader" className="qr-reader" />}
+                  <form className="scan-reference" onSubmit={(event) => { event.preventDefault(); findScannedBooking(scanReference); }}>
+                    <label>Booking reference<input required placeholder="SBL-CRT-YYYYMMDD-000000" value={scanReference} onChange={(event) => setScanReference(event.target.value.toUpperCase())} /></label>
+                    <button className="green">Find booking</button>
+                  </form>
+                  {scannedBooking && <article className="scanned-booking">
+                    <div><QrCode size={28} /><strong>Verified booking</strong></div>
+                    <h3>{scannedBooking.reference}</h3>
+                    <p><b>{scannedBooking.customer_name}</b> · {scannedBooking.mobile}</p>
+                    <p>{scannedBooking.booking_date} · {String(scannedBooking.start_time).slice(0, 5)} IST · {scannedBooking.duration_minutes} minutes</p>
+                    <span>{scannedBooking.status} · {scannedBooking.payment_method} · Paid ₹{((scannedBooking.amount_paid_paise || 0) / 100).toLocaleString("en-IN")}</span>
+                  </article>}
+                </section>
+                <h3>All bookings</h3><div className="booking-list admin-bookings">{!adminData.bookings.length ? <p>No bookings yet.</p> : adminData.bookings.map((b) => <article key={b.id}><b>{b.reference || "Payment pending"} · {b.customer_name}</b><p>{b.booking_date} · {String(b.start_time).slice(0, 5)} IST · {b.duration_minutes} minutes · {b.mobile}</p><span>{b.status} · {b.payment_method} · Paid ₹{((b.amount_paid_paise || 0) / 100).toLocaleString("en-IN")}</span></article>)}</div>
+                <button className="plain" onClick={async () => { await db.auth.signOut(); setAdminData(null); setAdminPassword(""); setMessage(""); }}>Sign out owner</button>
+              </>
+            )}
+            {message && <p className="notice" role="status">{message}</p>}
+    </section>
+  );
+  if (isOwnerPage)
+    return (
+      <>
+        <header>
+          <a className="brand" href="/">
+            <img className="brand-logo" src="/nigam-logo.png" alt="Nigam Developers logo" />
+            Nigam&apos;s Turf
+          </a>
+          <a className="plain" href="/">Back to website</a>
+        </header>
+        <main className="owner-page">{ownerPanel}</main>
+      </>
+    );
   return (
     <>
       <header>
@@ -935,9 +1003,6 @@ function App() {
           <button className="plain" onClick={() => open("bookings")}>
             My bookings
           </button>
-          <button className="plain" onClick={() => open("admin")}>
-            Owner dashboard
-          </button>
         </div>
         <p>
           © {new Date().getFullYear()} Nigam's Turf · Sambalpur, Odisha{" "}
@@ -950,63 +1015,6 @@ function App() {
           </span>
         </p>
       </footer>
-      {ownerOpen && (
-        <div className="modal-overlay">
-          <section className="modal admin-modal" role="dialog" aria-modal="true" aria-label="Owner dashboard">
-            <button className="close plain" aria-label="Close dialog" onClick={() => setOwnerOpen(false)}><X /></button>
-            <span className="overline">OWNER WORKSPACE</span><h2>Owner dashboard</h2>
-            {!adminData ? (
-              <><p>Sign in with your administrator ID and password.</p><form onSubmit={adminLogin}>
-                <label>Admin ID<input required value={adminId} onChange={(e) => setAdminId(e.target.value)} autoComplete="username" /></label>
-                <label>Password<input required type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} autoComplete="current-password" /></label>
-                <button className="green" disabled={busy}>{busy ? "Signing in…" : "Sign in as owner"}<ArrowRight size={17} /></button>
-              </form></>
-            ) : (
-              <>
-                <div className="admin-stats"><article><span>Collected revenue</span><strong>₹{(adminData.revenue_paise / 100).toLocaleString("en-IN")}</strong></article><article><span>Confirmed bookings</span><strong>{adminData.confirmed_count}</strong></article></div>
-                <div className="admin-grid">
-                  <form onSubmit={adminCreate}><h3>Create manual booking</h3>
-                    <label>Date<input required type="date" min={today()} value={adminForm.date} onChange={(e) => setAdminForm({ ...adminForm, date: e.target.value })} /></label>
-                    <label>Start time<input required type="time" min={adminForm.date === today() ? nextBookableTime() : "05:00"} max="22:30" step="1800" value={adminForm.start} onChange={(e) => setAdminForm({ ...adminForm, start: e.target.value })} /></label>
-                    <label>Duration<select value={adminForm.duration} onChange={(e) => setAdminForm({ ...adminForm, duration: +e.target.value })}>{[60, 90, 120].map((n) => <option key={n} value={n}>{n} minutes</option>)}</select></label>
-                    <label>Customer name<input required value={adminForm.name} onChange={(e) => setAdminForm({ ...adminForm, name: e.target.value })} /></label>
-                    <label>Mobile<input required pattern="[6-9][0-9]{9}" value={adminForm.mobile} onChange={(e) => setAdminForm({ ...adminForm, mobile: e.target.value })} /></label>
-                    <label>Payment<select value={adminForm.payment_method} onChange={(e) => setAdminForm({ ...adminForm, payment_method: e.target.value })}><option value="cash">Cash payment</option><option value="complimentary">No payment / complimentary</option></select></label>
-                    <button className="green" disabled={busy}>Create booking</button>
-                  </form>
-                  <div><h3>Block availability</h3><p>The date, time and duration selected on the left are used for slot blocking.</p>
-                    <label>Reason (required)<input required value={adminForm.reason} onChange={(e) => setAdminForm({ ...adminForm, reason: e.target.value })} /></label>
-                    <div className="admin-actions"><button className="outline" disabled={busy || !adminForm.reason.trim()} onClick={() => adminBlock(false)}>Block selected slot</button><button className="outline" disabled={busy || !adminForm.reason.trim() || adminForm.date <= today()} onClick={() => adminBlock(true)}>Block entire day</button></div>
-                    <h3>Active blocks</h3><div className="admin-list">{!adminData.blocks.length ? <p>No blocked periods.</p> : adminData.blocks.map((b) => <article key={b.id}><span><strong>{new Date(b.start_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}</strong> – {new Date(b.end_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}<br />Reason: {b.reason}</span><button className="plain" onClick={() => removeBlock(b.id)}>Remove</button></article>)}</div>
-                  </div>
-                </div>
-                <section className="admin-scanner">
-                  <h3>Scan booking QR</h3>
-                  <p>Scan the customer's booking QR or enter its reference to view the confirmed booking.</p>
-                  <div className="admin-actions">
-                    <button className="outline" type="button" onClick={() => setScanning((value) => !value)}><Camera size={17} /> {scanning ? "Stop camera" : "Open scanner"}</button>
-                  </div>
-                  {scanning && <div id="admin-qr-reader" className="qr-reader" />}
-                  <form className="scan-reference" onSubmit={(event) => { event.preventDefault(); findScannedBooking(scanReference); }}>
-                    <label>Booking reference<input required placeholder="SBL-CRT-YYYYMMDD-000000" value={scanReference} onChange={(event) => setScanReference(event.target.value.toUpperCase())} /></label>
-                    <button className="green">Find booking</button>
-                  </form>
-                  {scannedBooking && <article className="scanned-booking">
-                    <div><QrCode size={28} /><strong>Verified booking</strong></div>
-                    <h3>{scannedBooking.reference}</h3>
-                    <p><b>{scannedBooking.customer_name}</b> · {scannedBooking.mobile}</p>
-                    <p>{scannedBooking.booking_date} · {String(scannedBooking.start_time).slice(0, 5)} IST · {scannedBooking.duration_minutes} minutes</p>
-                    <span>{scannedBooking.status} · {scannedBooking.payment_method} · Paid ₹{((scannedBooking.amount_paid_paise || 0) / 100).toLocaleString("en-IN")}</span>
-                  </article>}
-                </section>
-                <h3>All bookings</h3><div className="booking-list admin-bookings">{!adminData.bookings.length ? <p>No bookings yet.</p> : adminData.bookings.map((b) => <article key={b.id}><b>{b.reference || "Payment pending"} · {b.customer_name}</b><p>{b.booking_date} · {String(b.start_time).slice(0, 5)} IST · {b.duration_minutes} minutes · {b.mobile}</p><span>{b.status} · {b.payment_method} · Paid ₹{((b.amount_paid_paise || 0) / 100).toLocaleString("en-IN")}</span></article>)}</div>
-                <button className="plain" onClick={async () => { await db.auth.signOut(); setAdminData(null); setAdminPassword(""); setMessage(""); }}>Sign out owner</button>
-              </>
-            )}
-            {message && <p className="notice" role="status">{message}</p>}
-          </section>
-        </div>
-      )}
       {modal && (
         <div
           className="modal-overlay"
@@ -1182,16 +1190,15 @@ function App() {
             ) : (
               <>
                 <span className="overline">
-                  {modal === "admin" ? "OWNER WORKSPACE" : "YOUR GAME PLAN"}
+                  YOUR GAME PLAN
                 </span>
                 <h2>
-                  {modal === "admin" ? "Bookings & revenue" : "My bookings"}
+                  My bookings
                 </h2>
                 {!session ? (
                   <>
                     <p>
-                      Sign in to access your bookings. Owner access requires an
-                      administrator role.
+                      Sign in to access your bookings.
                     </p>
                     <button className="green" onClick={() => open("login")}>
                       Sign in <ArrowRight size={17} />
@@ -1199,12 +1206,6 @@ function App() {
                   </>
                 ) : (
                   <>
-                    {modal === "admin" && (
-                      <p>
-                        Only authorized owners can view all bookings. Database
-                        access policies protect customer data.
-                      </p>
-                    )}
                     <div className="booking-list">
                       {!bookings.length ? (
                         <p>No bookings to display.</p>
